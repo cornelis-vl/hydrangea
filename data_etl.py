@@ -1,7 +1,10 @@
+#!/usr/local/bin/python3
+
 # Imports
 import glob
 import os
 import time
+import sys
 import cv2
 import numpy as np
 import pandas as pd
@@ -197,15 +200,23 @@ def cov_neural_net():
 
 if __name__ == '__main__':
 
-    KAGGLE_DIR = '[INSERT OWN HOME DIRECTORY]'
-    PROJECT_FOLDER = '/hydrangea'
+    PROJECT_DIR = os.getcwd() # locate to the 'hydrangea' folder
     DATA = '/data'
 
-    train_dir = KAGGLE_DIR + PROJECT_FOLDER + DATA + '/train'
-    test_dir = KAGGLE_DIR + PROJECT_FOLDER + DATA + '/test'
+    train_dir = PROJECT_DIR + DATA + '/train'
+    test_dir = PROJECT_DIR + DATA + '/test'
 
     # Load images
-    X_train, X_train_id, Y_train = etl_images(train_dir)
+    subset_input = int(sys.argv[1])
+    folder_input = sys.argv[2]
+
+    if folder_input == 'all':
+        train_dir = PROJECT_DIR + DATA + '/train'
+    elif folder_input == 'preview':
+        train_dir = PROJECT_DIR + DATA + '/train_preview'
+
+
+    X_train, X_train_id, Y_train = etl_images(image_loc=train_dir, subset=subset_input)
 
     # Split to train and test datasets
     X_train_train, X_train_test, Y_train_train,\
