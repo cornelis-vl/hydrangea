@@ -1,5 +1,4 @@
-# IMPORTS
-
+# Imports
 import glob
 import os
 import time
@@ -14,7 +13,7 @@ from keras.utils import np_utils
 from matplotlib import pyplot as plt
 from sklearn.metrics import classification_report
 
-# FUNCTIONS
+# Functions
 
 # I/O, ETL and other process functions.
 
@@ -48,7 +47,9 @@ def add_labels(dir, ids):
 
 
 def image_loader(folder, subset=100):
-    "Loads all images to array. Selects all available images unless subset is set to value between 1-99."
+    """Loads all images to array.
+    Selects all available images unless subset is set to value between 1-99.
+    """
 
     imgs_collector = []
     img_ids = []
@@ -74,7 +75,7 @@ def image_loader(folder, subset=100):
         img_ids.append(file_base)
         process_no += 1
 
-        if len(process_no) % 100 == 0:
+        if process_no % 100 == 0:
             print('Finished reading image {}..'.format(process_no))
 
     print('Total process time: {} seconds'.format(round(time.time() - start_time, 2)))
@@ -108,85 +109,128 @@ def to_class(categorical_obj):
     """Transforms categorical object to a list where each value represents
     the selected class with maximum predicted probability.
     """
-
     categorical_list = list(categorical_obj)
-
     class_obj = []
 
-    for yy in categorical_obj:
+    for yy in categorical_list:
         class_obj += [np.where(yy==max(yy))[0][0]]
 
     return class_obj
 
-def train_test_split(features, target, identifier, p=0.7):
+
+def train_test_split(features, target, identifier, prop=0.7):
+    """Split full dataset in train and test data according to specified property
+    assigned to the train data.
+    """
+
+    # Shuffle rows to mimic random selection
     rows = np.arange(0, target.shape[0])
     np.random.shuffle(rows)
 
-    threshold = int(p * len(rows))
+    # Define threshold to split shuffled rows into train and test sets
+    threshold = int(prop * len(rows))
     train_rows = rows[0:threshold]
     test_rows = rows[threshold:len(rows)]
+
+    # Create train and test sets for features, target and ids
     train_id = identifier[train_rows]
     test_id = identifier[test_rows]
-
     train_features = features[train_rows]
     test_features = features[test_rows]
-
     train_target = target[train_rows]
     test_target = target[test_rows]
 
     return train_features, test_features, train_target, test_target, train_id, test_id
 
-def create_model():
+
+def cov_neural_net():
+    """Store all model settings in one function"""
+
+    # Convolution part
     model = Sequential()
+
+    # Zero padding adds a row of zeros to top/bottom and column of zeros to left/right of features
     model.add(ZeroPadding2D((1, 1), input_shape=(3, 32, 32), dim_ordering='th'))
+
+    # 1-st convolution: This convolution returns an output of (8x8) using a (3x3) filter
     model.add(Convolution2D(8, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+
+    # Add zero padding to convoluted layer
     model.add(ZeroPadding2D((1, 1), dim_ordering='th'))
+
+    # 2-nd convlution: Apply convolution again, with dropout and pool results
     model.add(Convolution2D(8, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
     model.add(Dropout(0.2))
     model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), dim_ordering='th'))
 
+    # 3-rd convolution: Same as above, different dimension
     model.add(ZeroPadding2D((1, 1), dim_ordering='th'))
     model.add(Convolution2D(16, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+
+    # 4-th convulation: Same as above
     model.add(ZeroPadding2D((1, 1), dim_ordering='th'))
     model.add(Convolution2D(16, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
     model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), dim_ordering='th'))
     model.add(Dropout(0.2))
 
+    # Neural network part
+
+    # Input layer
     model.add(Flatten())
     model.add(Dense(32, activation='relu', init= 'lecun_uniform'))
     model.add(Dropout(0.4))
+
+    # Hidden layer
     model.add(Dense(32, activation='relu', init= 'lecun_uniform'))
     model.add(Dropout(0.2))
+
+    # Output for 2 classes
     model.add(Dense(2, activation='softmax'))
 
+    # Optimizer (stochastic gradient descent)
     sgd = SGD(lr=1e-2, decay=1e-4, momentum=0.9, nesterov=False)
     model.compile(optimizer=sgd, loss='categorical_crossentropy')
 
     return model
 
+# Run script
 
+if __name__ == '__main__':
 
+    KAGGLE_DIR = '[INSERT OWN HOME DIRECTORY]'
+    PROJECT_FOLDER = '/hydrangea'
+    DATA = '/data'
 
-train_dir = HOME_DIR + PROJECT_FOLDER + DATA + '/train'
-test_dir = HOME_DIR + PROJECT_FOLDER + DATA + '/test'
+    train_dir = KAGGLE_DIR + PROJECT_FOLDER + DATA + '/train'
+    test_dir = KAGGLE_DIR + PROJECT_FOLDER + DATA + '/test'
 
-X_train, X_train_id, Y_train = load_images(folder=train_dir, subset=25)
+    # Load images
+    X_train, X_train_id, Y_train = etl_images(train_dir)
 
-test_model = create_model()
-
-X_train_train, X_train_test, Y_train_train,\
-Y_train_test, ID_train_train, ID_train_test = train_test_split(features=X_train,
-                                                               target=Y_train,
-                                                               identifier=X_train_id)
-
-test_model.fit(X_train_train, Y_train_train,
+    # Split to train and test datasets
+    X_train_train, X_train_test, Y_train_train,\
+    Y_train_test, ID_train_train, ID_train_test = train_test_split(features=X_train,
+                                                                   target=Y_train,
+                                                                   identifier=X_train_id)
+    # Fit model
+    clf = cov_neural_net()
+    clf.fit(X_train_train, Y_train_train,
                batch_size=32, nb_epoch=10, verbose=1,
                validation_data=(X_train_test, Y_train_test))
 
-Yp_train_train = test_model.predict(X_train_train, batch_size=32, verbose=2)
-Yp_train_test = test_model.predict(X_train_test, batch_size=32, verbose=2)
+    # Predict train (for fit) and test (for predictive quality)
+    Yp_train_train = clf.predict(X_train_train, batch_size=32, verbose=2)
+    Yp_train_test = clf.predict(X_train_test, batch_size=32, verbose=2)
 
-Yp_train_train_cat = convert_to_class(Yp_train_train)
-Y_train_train_cat = convert_to_class(Y_train_train)
+    # Convert for evaluation
+    Yp_train_train_cat = to_class(Yp_train_train)
+    Y_train_train_cat = to_class(Y_train_train)
 
-print(classification_report(Y_train_train_cat, Yp_train_train_cat))
+    Yp_train_test_cat = to_class(Yp_train_test)
+    Y_train_test_cat = to_class(Y_train_test)
+
+    print("Fit quality of the model..")
+    print(classification_report(Y_train_train_cat, Yp_train_train_cat))
+
+    print("Predictive quality of the model..")
+    print(classification_report(Y_train_test_cat, Yp_train_test_cat))
