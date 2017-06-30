@@ -47,6 +47,8 @@ def add_labels(dir, ids):
     id_df.columns = ['id']
 
     combined = id_df.merge(labels, how='left', left_on='id', right_on='name', indicator=True, copy=True)
+    combined = pd.DataFrame(combined)
+    combined.to_csv("labels.csv", sep=',')
 
     target = combined['invasive']
     target_id = combined['id']
@@ -61,6 +63,7 @@ def image_loader(folder, subset=100, resize_dim=(32,32), add_target=True):
 
     imgs_collector = []
     img_ids = []
+    img_names = []
 
     start_time = time.time()
 
@@ -68,46 +71,52 @@ def image_loader(folder, subset=100, resize_dim=(32,32), add_target=True):
     files = glob.glob1(folder, '*.jpg')
 
     # Shuffle list for random selection of images.
-    np.random.shuffle(files)
-    subset_size = int((subset/100) * len(files))
+
+    if subset != 100:
+        np.random.shuffle(files)
+        subset_size = int((subset/100) * len(files))
+    else:
+        subset_size = len(files)
 
     print('Total of {} images to process..'.format(subset_size))
     process_no = 1
 
     for file in files[:subset_size]:
-
         file_base = int(os.path.basename(file)[:-4])
         img_path = folder + '/' + file
         img = get_im_cv2(img_path, resize_to=resize_dim)
         imgs_collector.append(img)
         img_ids.append(file_base)
+        img_names.append(file)
         process_no += 1
 
         if process_no % 100 == 0:
-            print('Finished reading image {}..'.format(process_no))
+            print('Finished reading image {}..'.format(file))
 
     print('Total process time: {} seconds'.format(round(time.time() - start_time, 2)))
 
     # Create target variable for the selected images in the correct order.
     if add_target:
         target, target_ids = add_labels(dir=folder, ids=img_ids)
+        #print(target[:10], target_ids[:10])
 
     elif not add_target:
         target = None
         target_ids = img_ids
+        #print(target, target_ids[:10])
 
-    return imgs_collector, target_ids, target
+    return imgs_collector, img_names, target_ids, target
 
 
 def etl_images(image_loc, subset=100, resize_to=(32,32), train=True):
-    features_raw, ids, target_raw = image_loader(folder=image_loc, subset=subset,
+    features_raw, X_train_names, ids, target_raw = image_loader(folder=image_loc, subset=subset,
                                                  resize_dim=resize_to, add_target=train)
 
     # To array, transpose to fit model, and standardized for max. pixel value (255).
     X_train = np.array(features_raw, dtype=np.uint8)
     X_train = X_train.transpose((0, 3, 1, 2))
     X_train = X_train.astype('float32')
-    X_train = X_train / 255
+    X_train /= 255
 
     # To array and categorical (one column for each class, 2 columns here)
 
@@ -119,7 +128,7 @@ def etl_images(image_loc, subset=100, resize_to=(32,32), train=True):
 
     X_train_id  = np.array(ids, dtype=np.uint8)
 
-    return X_train, X_train_id, Y_train
+    return X_train, X_train_names, X_train_id, Y_train
 
 
 # General functions
@@ -237,10 +246,10 @@ if __name__ == '__main__':
         train_dir = PROJECT_DIR + DATA + '/train'
         test_dir = PROJECT_DIR + DATA + '/test'
 
+    image_dim_resize = (32,32)
 
-
-    X_train, X_train_id, Y_train = etl_images(image_loc=train_dir, subset=subset_input,
-                                              resize_to=(128,128), train=True)
+    X_train, X_train_names, X_train_id, Y_train = etl_images(image_loc=train_dir, subset=subset_input,
+                                              resize_to=image_dim_resize, train=True)
 
     # Split to train and test datasets
     X_train_train, X_train_test, Y_train_train,\
@@ -272,20 +281,33 @@ if __name__ == '__main__':
     print(classification_report(Y_train_test_cat, Yp_train_test_cat))
 
     if folder_input == 'submission':
-        X_test, X_test_id, __ = etl_images(image_loc=test_dir, subset=100,
-                                                  resize_to=(128, 128), train=False)
+        X_test, X_test_names, X_test_id, __ = etl_images(image_loc=test_dir, subset=subset_input,
+                                                  resize_to=image_dim_resize, train=False)
+
+        pd.DataFrame(X_test_id).to_csv('test_ids.csv', sep=',')
+        pd.DataFrame(X_test_names).to_csv('test_names.csv', sep=',')
+
 
         Y_test_prop = clf.predict(X_test, batch_size=32, verbose=2)
         Y_test_cat = to_class(Y_test_prop)
 
-        prediction = pd.DataFrame({'name': X_test_id,
+        ids = [str_val[:-4] for str_val in X_test_names]
+
+        prediction = pd.DataFrame({'name': ids,
                                    'invasive': Y_test_prop[:,1]})
 
+
+        prediction = prediction[['name', 'invasive']]
+        #prediction.sort(prediction['name'], axis=1)
+
+        """
         prediction.set_index('name', drop=True, inplace=True)
         prediction['invasive'] = round(prediction['invasive'], 3)
         prediction.sort_index(inplace=True)
+        """
 
         prep_date = time.strftime("%y%m%d_%H%M")
         filename = 'submission_{}.csv'.format(prep_date)
 
-        prediction.to_csv(filename, sep=',', header=True, index=True)
+        prediction.to_csv(filename, sep=',', header=True, index=False)
+
