@@ -6,6 +6,7 @@ import os
 import time
 import sys
 import cv2
+import pickle
 import numpy as np
 import pandas as pd
 from keras.layers.convolutional import Convolution2D, MaxPooling2D, ZeroPadding2D
@@ -15,6 +16,7 @@ from keras.optimizers import SGD
 from keras.utils import np_utils
 from matplotlib import pyplot as plt
 from sklearn.metrics import classification_report
+from sklearn.metrics import roc_auc_score
 
 # Ignore Keras updates
 import warnings
@@ -36,6 +38,39 @@ def get_im_cv2(path, resize_to=(32,32)):
 def show_img(img):
     """Simple wrap to show an image."""
     plt.imshow(img)
+
+
+def save_imgs(imgs, names, ids, filenm, target=None):
+
+    project_file = os.path.join(os.getcwd(), 'images')
+    save_date = time.strftime('%y%m%d')
+    if not target is None:
+        to_save = {'labels': names, 'id': ids, 'images': imgs, 'target': target}
+    else:
+        to_save = {'labels': names, 'id': ids, 'images': imgs}
+
+    save_name = '{main_folder}/{main}_{date}.pkl'.format(main_folder=project_file, main=filenm, date=save_date)
+    pickle.dump(to_save, open(save_name, 'wb'))
+
+    print('Saved {num} images as file {name}..'.format(num=len(names), name=save_name))
+
+def load_imgs(filenm):
+    project_file = os.path.join(os.getcwd(), 'images')
+    load_file = os.path.join(project_file, filenm)
+    load_data = pickle.load(open(load_file, 'rb'))
+
+    print('Loaded images from file {name}..'.format(name=filenm))
+
+    return load_data
+
+def save_submission(to_submit):
+
+    project_file = os.path.join(os.getcwd(), 'submissions')
+    prep_date = time.strftime('%y%m%d_%H%M')
+    filename = '{main_folder}/submission_{date}.csv'.format(main_folder=project_file, date=prep_date)
+    to_submit.to_csv(filename, sep=',', header=True, index=False)
+
+    print('Saved prediction as file {name}..'.format(name=filename))
 
 
 def add_labels(dir, ids):
@@ -145,7 +180,7 @@ def to_class(categorical_obj):
     return class_obj
 
 
-def train_test_split(features, target, identifier, prop=0.7):
+def train_test_split(features, target, identifier, prop=0.85):
     """Split full dataset in train and test data according to specified property
     assigned to the train data.
     """
@@ -170,12 +205,9 @@ def train_test_split(features, target, identifier, prop=0.7):
     return train_features, test_features, train_target, test_target, train_id, test_id
 
 
-def cov_neural_net(input, output):
-    """Store all model settings in one function"""
-
+def base_model(input, output):
     input_layer_shape = input.shape[1:4]
     output_layer_shape = output.shape[1]
-
 
     # Convolution part
     model = Sequential()
@@ -208,12 +240,92 @@ def cov_neural_net(input, output):
 
     # Input layer
     model.add(Flatten())
-    model.add(Dense(32, activation='relu', init= 'lecun_uniform'))
+    model.add(Dense(64, activation='relu', init= 'lecun_uniform'))
     model.add(Dropout(0.4))
 
     # Hidden layer
-    model.add(Dense(32, activation='relu', init= 'lecun_uniform'))
+    model.add(Dense(64, activation='relu', init= 'lecun_uniform'))
     model.add(Dropout(0.2))
+
+    # Hidden layer
+    model.add(Dense(64, activation='relu', init= 'lecun_uniform'))
+    model.add(Dropout(0.2))
+
+    # Output for 2 classes
+    model.add(Dense(output_layer_shape, activation='softmax'))
+
+    # Optimizer (stochastic gradient descent)
+    sgd = SGD(lr=1e-2, decay=1e-4, momentum=0.9, nesterov=False)
+    model.compile(optimizer=sgd, loss='categorical_crossentropy')
+
+    return model
+
+
+def vgg16_model(input, output):
+
+    input_layer_shape = input.shape[1:4]
+    output_layer_shape = output.shape[1]
+
+
+    # Convolution part
+    model = Sequential()
+
+    # Block 1
+    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+    model.add(Convolution2D(64, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(64, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+    model.add(Dropout(0.2))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), dim_ordering='th'))
+
+    # Block 2
+    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+    model.add(Convolution2D(128, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(128, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(Dropout(0.2))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), dim_ordering='th'))
+
+    # Block 3
+    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+    model.add(Convolution2D(256, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(256, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(256, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+    model.add(Dropout(0.2))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), dim_ordering='th'))
+
+    # Block 4
+    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+    model.add(Convolution2D(512, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(512, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(512, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+    model.add(Dropout(0.2))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), dim_ordering='th'))
+
+    # Block 5
+    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+    model.add(Convolution2D(512, 3, 3, activation='relu', dim_ordering='th', init='lecun_uniform', subsample=(1, 1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(512, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+#    model.add(ZeroPadding2D((1, 1), input_shape=input_layer_shape, dim_ordering='th'))
+#    model.add(Convolution2D(512, 3, 3, activation='relu', dim_ordering='th', init= 'lecun_uniform', subsample=(1,1)))
+    model.add(Dropout(0.2))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), dim_ordering='th'))
+
+    # Neural network part
+
+    # Input layer
+    model.add(Flatten())
+    model.add(Dense(4096, activation='relu', init= 'lecun_uniform'))
+    model.add(Dropout(0.4))
+
+    # First Hidden layer
+    model.add(Dense(4096, activation='relu', init= 'lecun_uniform'))
+    model.add(Dropout(0.3))
 
     # Output for 2 classes
     model.add(Dense(output_layer_shape, activation='softmax'))
@@ -237,19 +349,79 @@ if __name__ == '__main__':
     # Load images
     subset_input = int(sys.argv[1])
     folder_input = sys.argv[2]
+    model_type = sys.argv[3]
+    loader = sys.argv[4]
+    dims = sys.argv[5]
 
     if folder_input == 'all':
         train_dir = PROJECT_DIR + DATA + '/train'
     elif folder_input == 'preview':
         train_dir = PROJECT_DIR + DATA + '/train_preview'
-    elif folder_input == 'submission':
+    elif folder_input == 'submission' or folder_input == 'resizer':
         train_dir = PROJECT_DIR + DATA + '/train'
         test_dir = PROJECT_DIR + DATA + '/test'
 
-    image_dim_resize = (32,32)
+    ### PREP IMAGE Files
 
-    X_train, X_train_names, X_train_id, Y_train = etl_images(image_loc=train_dir, subset=subset_input,
-                                              resize_to=image_dim_resize, train=True)
+    if folder_input == 'resizer':
+
+        def resize_and_save(resizer):
+            fn_train = 'train_{}_p{}'.format(resizer[0], subset_input)
+            fn_test = 'test_{}_p{}'.format(resizer[0], subset_input)
+            X_train, X_train_names, X_train_id, Y_train = etl_images(image_loc=train_dir, subset=subset_input,
+                                                                     resize_to=resizer, train=True)
+
+            save_imgs(imgs=X_train, names=X_train_names, ids=X_train_id, filenm=fn_train, target=Y_train)
+
+            print('Done saving {}..'.format(fn_train))
+
+            X_test, X_test_names, X_test_id, __ = etl_images(image_loc=test_dir, subset=subset_input,
+                                                             resize_to=resizer, train=False)
+
+            save_imgs(imgs=X_test, names=X_test_names, ids=X_test_id, filenm=fn_test)
+
+            print('Done saving {}..'.format(fn_test))
+
+        # 32 x 32
+        resize32 = (32,32)
+        resize_and_save(resizer=resize32)
+
+        # 64 x 64
+        resize64 = (64,64)
+        resize_and_save(resizer=resize64)
+
+        # 128 x 128
+        resize128 = (128,128)
+        resize_and_save(resizer=resize128)
+
+        # 224 x 224
+        resize224 = (224,224)
+        resize_and_save(resizer=resize224)
+
+
+        answer = input('Finished processing images, continue to make prediction?:')
+        if answer.lower().startswith('y'):
+            print('Continuing to do prediction..')
+        elif answer.lower().startswith('n'):
+            print('Exiting script..')
+            exit()
+
+    # Run script
+
+    image_dim_resize = (dims,dims)
+
+    if loader == 'preprocessed':
+        file_name = 'train_{}_p100_170704.pkl'.format(dims)
+        train_data = load_imgs(file_name)
+
+        X_train = train_data['images']
+        X_train_id = train_data['id']
+        X_train_names = train_data['labels']
+        Y_train = train_data['target']
+
+    elif loader == 'process':
+        X_train, X_train_names, X_train_id, Y_train = etl_images(image_loc=train_dir, subset=subset_input,
+                                                                 resize_to=image_dim_resize, train=True)
 
     # Split to train and test datasets
     X_train_train, X_train_test, Y_train_train,\
@@ -257,10 +429,14 @@ if __name__ == '__main__':
                                                                    target=Y_train,
                                                                    identifier=X_train_id)
     # Fit model
-    clf = cov_neural_net(X_train_train, Y_train_train)
+
+    if model_type == 'standard':
+        clf = base_model(X_train_train, Y_train_train)
+    elif model_type == 'vgg16':
+        clf = vgg16_model(X_train_train, Y_train_train)
 
     clf.fit(X_train_train, Y_train_train,
-               batch_size=32, nb_epoch=10, verbose=1,
+               batch_size=32, nb_epoch=30, verbose=1,
                validation_data=(X_train_test, Y_train_test))
 
     # Predict train (for fit) and test (for predictive quality)
@@ -274,19 +450,30 @@ if __name__ == '__main__':
     Yp_train_test_cat = to_class(Yp_train_test)
     Y_train_test_cat = to_class(Y_train_test)
 
-    print("Fit quality of the model..")
+    # Fit quality
+    print('Fit quality of the model..')
     print(classification_report(Y_train_train_cat, Yp_train_train_cat))
 
-    print("Predictive quality of the model..")
+    # Predictive quality
+    print('Predictive quality of the model..')
     print(classification_report(Y_train_test_cat, Yp_train_test_cat))
 
+    #ROC score
+    roc_score = round(roc_auc_score(Y_train_test_cat, Yp_train_test[:,1]),3)
+    print('The ROC-score for this model is: {}'.format(roc_score))
+
     if folder_input == 'submission':
-        X_test, X_test_names, X_test_id, __ = etl_images(image_loc=test_dir, subset=subset_input,
-                                                  resize_to=image_dim_resize, train=False)
+        if loader == 'preprocessed':
+            file_name = 'test_{}_p100_170704.pkl'.format(dims)
+            test_data = load_imgs(file_name)
 
-        pd.DataFrame(X_test_id).to_csv('test_ids.csv', sep=',')
-        pd.DataFrame(X_test_names).to_csv('test_names.csv', sep=',')
+            X_test = test_data['images']
+            X_test_id = test_data['id']
+            X_test_names = test_data['labels']
 
+        elif loader == 'process':
+            X_test, X_test_names, X_test_id, __ = etl_images(image_loc=test_dir, subset=subset_input,
+                                                             resize_to=image_dim_resize, train=False)
 
         Y_test_prop = clf.predict(X_test, batch_size=32, verbose=2)
         Y_test_cat = to_class(Y_test_prop)
@@ -296,18 +483,7 @@ if __name__ == '__main__':
         prediction = pd.DataFrame({'name': ids,
                                    'invasive': Y_test_prop[:,1]})
 
-
         prediction = prediction[['name', 'invasive']]
-        #prediction.sort(prediction['name'], axis=1)
 
-        """
-        prediction.set_index('name', drop=True, inplace=True)
-        prediction['invasive'] = round(prediction['invasive'], 3)
-        prediction.sort_index(inplace=True)
-        """
-
-        prep_date = time.strftime("%y%m%d_%H%M")
-        filename = 'submission_{}.csv'.format(prep_date)
-
-        prediction.to_csv(filename, sep=',', header=True, index=False)
+        save_submission(to_submit=prediction)
 
